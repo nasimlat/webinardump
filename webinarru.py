@@ -1,3 +1,4 @@
+import os
 import logging
 import shutil
 import subprocess
@@ -95,9 +96,14 @@ def concat_chunks(path: Path) -> Path:
 
     fname_video = 'all_chunks.mp4'
     fname_index = 'all_chunks.txt'
-    call = partial(subprocess.check_call, cwd=path, shell=True)
 
-    call(f'for i in `ls *.ts | sort -V`; do echo "file $i"; done >> {fname_index}')
+    with open(path / fname_index, 'w') as f:
+        for filename in sorted(os.listdir(path), key=lambda x: x.split('.')[0]):
+            if filename.endswith('.ts'):
+                f.write(f"file '{filename}'\n")
+        
+
+    call = partial(subprocess.check_call, cwd=path, shell=True)
     call(f'ffmpeg -f concat -i {fname_index} -c copy -bsf:a aac_adtstoasc {fname_video}')
 
     return path / fname_video
@@ -119,15 +125,17 @@ def download_chunks(*, url_video_root: str, dump_dir: Path, chunk_names: List[st
 
         LOGGER.info(f'Get {idx}/{chunks_total} ({chunk_name}) [{percent}%] ...')
 
-        chunk_url = f'{url_video_root}/{chunk_name}'
+        if not (dump_dir / chunk_name).exists():
+            chunk_url = f'{url_video_root}/{chunk_name}'
 
-        with session.get(chunk_url, headers={'Referer': url_entry}, stream=True) as r:
-            r.raise_for_status()
-            with open(str(dump_dir / chunk_name), 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-
-        sleep(choice([1, 0.5, 0.7, 0.6]))
+            with session.get(chunk_url, headers={'Referer': url_entry}, stream=True) as r:
+                r.raise_for_status()
+                with open(str(dump_dir / chunk_name), 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            sleep(choice([1, 0.5, 0.7, 0.6]))
+        else:
+            LOGGER.info(f'File {chunk_name} already exists, skipping download.')
 
 
 def run(*, url_entry: str, url_chunklist: str, start_chunk: str = ''):
@@ -157,6 +165,7 @@ def run(*, url_entry: str, url_chunklist: str, start_chunk: str = ''):
     )
 
     title = manifest['name']
+    title = title.replace(':', '-').replace('-', '_')
 
     LOGGER.info(f'Title: {title}')
 
